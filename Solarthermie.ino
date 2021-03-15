@@ -1,6 +1,24 @@
 // Include the libraries we need
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include "credentials.h" //My Wifi and MQTT credentials
+
+//ESP Stuff
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWD;
+const char* mqtt_server = "192.168.178.143";
+/* const char* mqqt_username = MQTT_USERN; */
+/* const char* mqtt_password = MQTT_PASSWD; */
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+unsigned long lastMsg = 0;
+#define MSG_BUFFER_SIZE	(50)
+char msg[MSG_BUFFER_SIZE];
+int value = 0;
+//
 
 // Data wire is plugged into port 2 on the Arduino
 #define ONE_WIRE_BUS 4
@@ -22,11 +40,62 @@ DallasTemperature sensors(&oneWire);
 DeviceAddress roofThermometer = { 0x28, 0xA7, 0xEC, 0x75, 0xD0, 0x01, 0x3C, 0xD5 };
 DeviceAddress tankThermometer   = { 0x28, 0xE0, 0x73, 0x75, 0xD0, 0x01, 0x3C, 0xFD };
 
+void setup_wifi() {
+
+  delay(10);
+  // start by connecting to a WiFi network
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  randomSeed(micros());
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = "ESP8266Client-";
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    /* if (client.connect(clientId.c_str(), mqqt_username, mqtt_password)) { */
+    if (client.connect(clientId.c_str())) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      client.publish("sensors/bad/bme280/debug", "MQTT connection established");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
 void setup(void)
 {
+  /* pinMode(BUILTIN_LED, OUTPUT);     // Initialize the BUILTIN_LED pin as an output */
+  setup_wifi();
+  client.setServer(mqtt_server, 1883);
+
   // start serial port
   Serial.begin(9600);
-  delaystartup(5);
+  /* delaystartup(5); */
   Serial.println("Dallas Temperature IC Control Library Demo");
 
   // Start up the library
@@ -110,8 +179,9 @@ void printTemperature(DeviceAddress deviceAddress)
   }
   Serial.print("Temp C: ");
   Serial.print(tempC);
-  Serial.print(" Temp F: ");
-  Serial.print(DallasTemperature::toFahrenheit(tempC));
+  client.publish("sensors/test/ds18b20/temp1", String(tempC).c_str());
+  /* Serial.print(" Temp F: "); */
+  /* Serial.print(DallasTemperature::toFahrenheit(tempC)); */
 }
 
 // function to print a device's resolution
@@ -132,26 +202,30 @@ void printData(DeviceAddress deviceAddress)
   Serial.println();
 }
 
-void delaystartup(seconds)
-{
-  for(int i = seconds; i == 0; i--;)
-  {
-    delay(1000);
-  }
-}
+//void delaystartup(seconds)
+//{
+//  for(int i = seconds; i == 0; i--;)
+//  {
+//    delay(1000);
+//  }
+//}
 
 /*
    Main function, calls the temperatures in a loop.
 */
 void loop(void)
 {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
   // call sensors.requestTemperatures() to issue a global temperature
   // request to all devices on the bus
   Serial.print("Requesting temperatures...");
   sensors.requestTemperatures();
   Serial.println("DONE");
 
-  // print the device information
+  /* print the device information */
   printData(roofThermometer);
   printData(tankThermometer);
 }
